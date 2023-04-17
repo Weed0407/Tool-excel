@@ -1,0 +1,132 @@
+import pandas as pd
+import tkinter as tk
+from tkinter import filedialog
+
+
+# Thanh cong tim 5 cell te nhat dong thoi doi mau chu
+class App:
+    def __init__(self, master):
+        self.master = master
+        master.geometry("500x520")
+        master.title("Tool Excel")
+        self.df = None
+        self.columns = None
+        self.cb_vars = []
+
+        # Create "Open File" button
+        self.btn_open_file = tk.Button(master, text="Open File", command=self.process_data)
+        self.btn_open_file.pack(pady=10)
+
+    def process_data(self):
+        # Select input file
+        file_path = filedialog.askopenfilename()
+        if file_path:
+            # Load data
+            # Load the Excel file and select columns to read
+            self.df = pd.read_excel(file_path, sheet_name='Sheet 1')
+
+            # Filter data
+            self.df = self.df[self.df['Cell'] != 'Total']
+            # Cong thuc tinh RRC_Fail
+            self.df['RRC_fail'] = self.df['RRC_attempt'] - self.df['RRC_success']
+            # Cong thuc tinh S1_Signal_Fail
+            self.df['s1_fail'] = self.df['S1_signaling_attempt'] - self.df['S1_signal_success']
+            # Cong thuc tinh E_RAB_PS_Fail
+            self.df['E_RAB_PS_fail'] = self.df[['IE_RAB_attempt', 'AE_RAB_attempt']].sum(axis=1) \
+                                       - self.df[['AE_RAB_success', 'IE_RAB_success']].sum(axis=1)
+            # Cong thuc tinh E_RAB_Volte_Fail
+            self.df['E_RAB_Volte_fail'] = self.df[['VoLTE_Add_ERAB_Att_Qci5', 'VoLTE_In_ERAB_Att_Qci5',
+                                                   'VoLTE_Add_ERAB_Att_Qci1',
+                                                   'VoLTE_In_ERAB_Att_Qci1']].sum(axis=1) \
+                                          - self.df[['VoLTE_Add_ERAB_Succ_Qci5', 'VoLTE_In_ERAB_Succ_Qci5',
+                                                     'VoLTE_Add_ERAB_Succ_Qci1',
+                                                     'VoLTE_In_ERAB_Succ_Qci1']].sum(axis=1)
+
+            # Cong thuc tinh tong 3 column Fail
+            self.df['Total_fail'] = self.df[['RRC_fail', 's1_fail', 'E_RAB_PS_fail']].sum(axis=1)
+
+            # Create "Select Columns" window
+            self.select_columns_window()
+
+    def select_columns_window(self):
+        # Create "Select Columns" window
+        self.select_columns_window = tk.Toplevel(self.master)
+        self.select_columns_window.geometry("1200x720")
+        self.select_columns_window.title("Select Columns")
+
+        selected_columns = ['Cell', 'RRC_fail',
+                            'RRC_SR', 's1_fail', 'S1SIG_SSR', 'E_RAB_PS_fail', 'e_RAB_SR', 'E_RAB_Volte_fail',
+                            'Total_fail',
+                            'e_PS_CSSR', 'VoLTE_CSSR']
+
+        # Create Checkbuttons for each column
+        self.columns = self.df[selected_columns]
+        row_num = 0
+        col_num = 0
+        max_cols = 5  # maximum number of columns per row
+        for column in self.columns:
+            var = tk.BooleanVar()
+            cb = tk.Checkbutton(self.select_columns_window, text=column, variable=var)
+            cb.grid(row=row_num, column=col_num, sticky='w')
+            self.cb_vars.append((column, var))
+            col_num += 1
+            if col_num == max_cols:
+                row_num += 1
+                col_num = 0
+
+        # Create "Apply" button
+        btn_apply = tk.Button(self.select_columns_window, text="Apply", command=self.apply_selection)
+        btn_apply.grid(row=row_num + 1, column=0, pady=10)
+
+        # Create "Select All" checkbox
+        self.select_all_var = tk.BooleanVar()
+        self.select_all_cb = tk.Checkbutton(self.select_columns_window, text="Select All", variable=self.select_all_var,
+                                            command=self.select_all_columns)
+        self.select_all_cb.grid(row=row_num + 2, column=0, sticky='w')
+
+    def select_all_columns(self):
+        # Set the values of all column checkboxes to be the same as the "Select All" checkbox
+        for column, var in self.cb_vars:
+            var.set(self.select_all_var.get())
+
+    def apply_selection(self):
+        # Define selected columns and sort order
+        selections = [
+            ('e_PS_CSSR',
+             ['Cell', 'RRC_fail', 'RRC_SR', 's1_fail', 'S1SIG_SSR', 'E_RAB_PS_fail', 'e_RAB_SR', 'Total_fail',
+              'e_PS_CSSR'], 'Total_fail'),
+            ('VoLTE_CSSR',
+             ['Cell', 'RRC_fail', 'RRC_SR', 's1_fail', 'S1SIG_SSR', 'E_RAB_Volte_fail', 'Total_fail', 'VoLTE_CSSR'],
+             'Total_fail'),
+            ('VoLTE_CDR', ['Cell', 'VoLTE_Call_Att', 'VoLTE_Call_Drop', 'VoLTE_CDR'], 'VoLTE_Call_Drop')
+        ]
+        # Prompt user to select save location
+        file_path = filedialog.asksaveasfilename(defaultextension='.xlsx')
+        if not file_path:
+            return
+        # Create Excel writer
+        writer = pd.ExcelWriter(file_path, engine='xlsxwriter')
+        workbook = writer.book
+        # Define format object for headers
+        format_red = workbook.add_format({'bold': True, 'font_color': 'red'})
+        # Loop through selections and write tables to separate sheets with formatting
+        for sheet_name, selected_cols, sort_col in selections:
+            table = self.df[selected_cols].sort_values(by=sort_col, ascending=False).head(5).round(2)
+            table.to_excel(writer, sheet_name=sheet_name, index=False)
+            worksheet = writer.sheets[sheet_name]
+            for col_num, value in enumerate(table.columns.values):
+                if value in ['RRC_fail', 's1_fail', 'E_RAB_PS_fail','E_RAB_Volte_fail', 'Total_fail', 'VoLTE_Call_Drop']:
+                    # set header format to red
+                    worksheet.write(0, col_num, value, format_red)
+                    # set column format to red
+                    worksheet.set_column(col_num, col_num, None, format_red)
+        # Close Excel writer and save file
+        writer.close()
+        # Close "Select Columns" window
+        self.select_columns_window.destroy()
+        self.master.destroy()
+
+
+root = tk.Tk()
+app = App(master=root)
+root.mainloop()
